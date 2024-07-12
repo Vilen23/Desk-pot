@@ -10,7 +10,6 @@ import {
 import { useEffect, useState } from "react";
 export default function Componentt() {
   const [socket, setSocket] = useState<WebSocket | null>(null);
-  const [peer, setPeer] = useState<RTCPeerConnection | null>(null);
 
   useEffect(() => {
     const socket = new WebSocket(`ws://localhost:8080`);
@@ -24,26 +23,21 @@ export default function Componentt() {
     };
   }, []);
 
-  const handleScreenShare = () => {
+  const handleScreenShare = async () => {
     if (!socket) {
       console.log("socket missing");
       return;
     }
 
-    socket.onmessage = async (event) => {
-      const message = JSON.parse(event.data);
-      const type = message.type;
-      switch (type) {
-        case "createAnswer":
-          await peer?.setRemoteDescription(message.sdp);
-          break;
-        case "iceCandidate":
-          pc.addIceCandidate(message.candidate);
-      }
-    };
-
     const pc = new RTCPeerConnection();
-    setPeer(pc);
+
+    pc.onnegotiationneeded = async () => {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.send(
+        JSON.stringify({ type: "createOffer", sdp: pc.localDescription })
+      );
+    };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -55,23 +49,27 @@ export default function Componentt() {
         );
       }
     };
-    pc.onnegotiationneeded = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      socket.send(
-        JSON.stringify({ type: "createOffer", sdp: pc.localDescription })
-      );
+
+    socket.onmessage = async (event) => {
+      const message = JSON.parse(event.data);
+      const type = message.type;
+      switch (type) {
+        case "createAnswer":
+          await pc.setRemoteDescription(message.sdp);
+          break;
+        case "iceCandidate":
+          pc.addIceCandidate(message.candidate);
+          break;
+      }
     };
-    getCameraStreamAndSend(pc);
+
+    const stream = await navigator.mediaDevices.getDisplayMedia({
+      video:true,
+      audio:false
+    })
+    pc.addTrack(stream.getTracks()[0]);
   };
 
-  const getCameraStreamAndSend = (pc: RTCPeerConnection) => {
-    navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
-      stream.getTracks().forEach((track) => {
-        pc?.addTrack(track);
-      });
-    });
-  };
 
   return (
     <div className="flex flex-col min-h-[100dvh]">
